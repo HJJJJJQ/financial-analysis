@@ -80,17 +80,55 @@ py -3 -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
-直接使用以下命令后台启动 Flask ：
+在当前终端直接启动 Flask：
 
 ```bash
 python run.py --port 8765
 ```
+
+与同级 TDX 项目一起开发时，也可由 TDX 启动器托管进程、日志和停止操作：
+
+```bash
+cd ../tdx
+./start.sh financial-analysis
+./start.sh status
+```
+
+启动器默认使用本项目 `.venv/bin/python`；使用其他独立环境时设置
+`FINANCIAL_ANALYSIS_PYTHON=/path/to/python`。它不会把本项目的 AKShare 依赖
+安装进 TDX 的 `tdmm` 环境。默认执行 `./start.sh` 时也会先启动本服务。
 
 打开：
 
 ```text
 http://127.0.0.1:8765
 ```
+
+### 3.1 向 TDX 提供 AKShare 市场快照
+
+本项目同时是 TDX 的独立公开数据采集后端。TDX 提交异步
+`market_snapshot` 任务，本项目在自己的 Python/AKShare 环境中采集并生成
+`manifest.json`、`akshare_market_state.csv.gz` 和
+`akshare_sector_flow.csv.gz`；TDX 下载后自行校验 SHA256、入湖并写入
+PostgreSQL。本项目不会直接连接或写入 TDX 数据库。
+
+默认只绑定 `127.0.0.1:8765`。需要跨主机访问时，应显式设置共享 Token：
+
+```bash
+export FINANCIAL_ANALYSIS_API_TOKEN='replace-with-a-random-secret'
+python run.py --host 0.0.0.0 --port 8765
+```
+
+运行产物默认写入被 Git 忽略的 `data/tdx_exports/`，可通过
+`FINANCIAL_ANALYSIS_TDX_EXPORT_DIR` 更改。机器接口包括：
+
+- `GET /api/tdx-data/health`
+- `POST /api/tdx-data/jobs`
+- `GET /api/tdx-data/jobs/<job_id>`
+- `GET /api/tdx-data/jobs/<job_id>/manifest`
+- `GET /api/tdx-data/jobs/<job_id>/files/<filename>`
+- `POST /api/tdx-data/akshare/<operation>`（仅 17 个版本化白名单表接口，含 ETF 历史日线和日期型涨停、跌停、炸板池）
+- `POST /api/tdx-data/baostock/history`（单只股票历史成交额/换手率）
 
 **重要** 第一次使用，要在A股策略里点击“刷新数据”获取最新数据。为了更好的使用体验，后续每天收盘后也要刷新一下，建议每个交易日17点后刷新。
 

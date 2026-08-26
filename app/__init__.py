@@ -13,10 +13,12 @@ def create_app() -> Flask:
     from app.routes.jobs import bp as jobs_bp
     from app.routes.radar import bp as radar_bp
     from app.routes.stock import bp as stock_bp
+    from app.routes.tdx_data import bp as tdx_data_bp
 
     app.register_blueprint(home_bp)
     app.register_blueprint(fund_bp)
     app.register_blueprint(stock_bp)
     app.register_blueprint(radar_bp)
     app.register_blueprint(jobs_bp)
+    app.register_blueprint(tdx_data_bp)
     return app

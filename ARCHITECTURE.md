@@ -9,7 +9,7 @@
 - 离线数据面：抓取公开数据、写入 SQLite、计算策略/雷达/行业结果，并生成 JSON 或 SVG 产物。
 - 本地控制面：Flask 读取已有产物、执行轻量重算，并在用户显式操作后启动后台脚本。
 
-`run.py` 启动时只创建 Flask 应用并异步预热股票策略缓存，不会自动执行全量网络抓取。网页默认绑定 `127.0.0.1`，没有账号、鉴权或多租户边界。
+`run.py` 启动时只创建 Flask 应用并异步预热股票策略缓存，不会自动执行全量网络抓取。网页默认绑定 `127.0.0.1`，没有账号或多租户边界；供 TDX 调用的机器接口可通过 `FINANCIAL_ANALYSIS_API_TOKEN` 启用 Bearer Token。
 
 ```mermaid
 flowchart LR
@@ -37,7 +37,7 @@ flowchart LR
 
 ### 2.1 Web 层
 
-`run.py` 调用 `app.create_app()`，注册五组 Blueprint：
+`run.py` 调用 `app.create_app()`，注册六组 Blueprint：
 
 | 路径 | 路由 | 服务/核心模块 | 职责 |
 | --- | --- | --- | --- |
@@ -46,6 +46,7 @@ flowchart LR
 | `/stock` | `app/routes/stock.py` | `app/services/stock_strategy_service.py` | 策略配置、轻量重打分、刷新、优化器与回测图 |
 | `/radar` | `app/routes/radar.py` | `app/services/radar_service.py` | 雷达结果、实时行情、K 线、形态回放、三级行业热度报告和后台任务 |
 | `/api/jobs/<id>` | `app/routes/jobs.py` | `app/services/job_service.py` | 通用后台任务状态和最近日志 |
+| `/api/tdx-data/*` | `app/routes/tdx_data.py` | `app/services/tdx_data_service.py`、`tdx_market_snapshot.py` | TDX 市场快照任务、状态、受限产物下载和白名单 AKShare 表调用 |
 
 路由层负责 HTTP 参数和响应；服务层负责文件/数据库读取、缓存和后台命令编排；大型策略与研究逻辑仍保留在顶层脚本中。前端是 Jinja 模板、原生 JavaScript 和 CSS，没有单独的打包步骤。
 
@@ -54,6 +55,23 @@ flowchart LR
 `app/services/job_service.py` 在当前 Flask 进程中维护任务状态，并以独立进程组启动脚本、合并 stdout/stderr、限制日志长度、处理超时和终止子进程树。POSIX 系统使用进程组信号，Windows 使用新进程组和 `taskkill /T /F`；子进程统一启用 UTF-8 输出。
 
 股票刷新、雷达刷新、雷达重算和优化器共享 `stock-data-refresh` 资源锁，避免同时改写同一 SQLite/JSON 产物。任务状态只存在内存中：Flask 重启后状态会丢失，但已经写入磁盘的产物保留。
+
+TDX 市场快照使用独立的 `tdx-akshare-market-snapshot` 资源锁。同一时刻只允许
+一个采集任务；结果先写 `data/tdx_exports/ready/.<job>.partial`，完成后原子
+改名。下载接口只允许 manifest 和两个标准压缩 CSV 文件，任务号和文件名均
+经过白名单/格式校验。采集后端只生成带 SHA256 的结果包，不持有 TDX 数据库
+凭据，也不直接写 TDX 数据湖或 PostgreSQL。
+
+龙虎榜、股东户数、回购、证券日线参考和主数据等旧 TDX 落库流程使用
+`POST /api/tdx-data/akshare/<operation>`。服务只允许代码声明的 17 个
+DataFrame 接口和标量参数，返回 `orient=split` 的列与数据；它不是任意函数
+执行或通用代理。重试、批次、PIT 转换、原始 Parquet 和数据库事务仍由 TDX
+负责。白名单包含按日期查询的东方财富涨停、跌停和炸板池，供 TDX 对近期历史
+大盘状态做尽力增强；不提供任意 AKShare 函数调用，也不批量代理逐行业历史资金流。
+
+主力雷达历史参考行情缺口还可调用
+`POST /api/tdx-data/baostock/history`。该接口只接受单只规范 A 股代码和日期
+范围，返回不复权成交额、换手率及交易状态，不提供任意 BaoStock 函数代理。
 
 `stock_radar_fresh_data.py` 是股票工作台与雷达共同使用的跨平台全量刷新入口，顺序为：
 
@@ -239,4 +257,6 @@ Schema 变更必须通过 `ensure_schema()` 的幂等迁移完成，并同步递
 - ETF 机会分尚未经过 ETF 专项事件研究。
 - 后台任务状态是进程内状态，不支持多 Flask worker 协调。
 - 依赖未锁定精确版本，外部库升级后应优先跑完整测试并复核抓取字段。
-- 服务没有鉴权；除非另行增加安全边界，不应暴露到不可信网络。
+- 浏览器工作台没有用户鉴权，不应暴露到不可信网络。TDX 机器接口只有在配置
+  `FINANCIAL_ANALYSIS_API_TOKEN` 后才要求 Bearer Token；跨主机部署必须启用
+  Token，并在外层提供 TLS 或可信内网边界。

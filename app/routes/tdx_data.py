@@ -10,6 +10,7 @@ from app.services.tdx_data_service import (
     machine_job_state,
     start_market_snapshot,
 )
+from app.services.repurchase_source import RepurchaseSourceError, repurchase_source_status
 
 
 bp = Blueprint("tdx_data", __name__)
@@ -25,7 +26,8 @@ def require_machine_auth():
 @bp.get("/api/tdx-data/health")
 def health():
     """返回独立采集后端的轻量健康状态。"""
-    return jsonify({"status": "ok", "service": "financial-analysis"})
+    return jsonify({"status": "ok", "service": "financial-analysis",
+                    "repurchase_source": repurchase_source_status()})
 
 
 @bp.post("/api/tdx-data/jobs")
@@ -70,6 +72,9 @@ def call_akshare(operation: str):
     try:
         return jsonify(call_akshare_operation(
             operation, payload.get("kwargs") or {}))
+    except RepurchaseSourceError as exc:
+        return jsonify({"error": str(exc), "code": "repurchase_source_unavailable"}), 502, {
+            "Retry-After": str(exc.retry_after_seconds)}
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:

@@ -180,6 +180,9 @@ def _configured_codes(config: Mapping[str, list[str]]) -> list[str]:
 
 
 def _atomic_write_text(path: Path, content: str) -> None:
+    """原子保存配置；固定源码中的配置链接写入真实外部目标。"""
+    if path.is_symlink():
+        path = path.resolve(strict=True)
     path.parent.mkdir(parents=True, exist_ok=True)
     mode = path.stat().st_mode & 0o777 if path.exists() else 0o644
     temp_name = None

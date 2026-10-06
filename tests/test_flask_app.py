@@ -860,6 +860,40 @@ class FlaskAppTest(unittest.TestCase):
         self.assertEqual(payload["path"], "fund/funds.py")
         self.assertIn("get_funds", payload["content"])
 
+    def test_fund_editor_preserves_link_in_readonly_release(self):
+        """真实编辑API必须更新外部配置，并保留只读源码内的绑定链接。"""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            release, state = root / "release", root / "state"
+            (release / "fund").mkdir(parents=True)
+            state.mkdir()
+            (state / "data").mkdir()
+            external = state / "funds.py"
+            external.write_text(VALID_FUND_EDITOR_CONTENT, encoding="utf-8")
+            external.chmod(0o640)
+            editor = release / "fund" / "funds.py"
+            editor.symlink_to(external)
+            (release / "data").symlink_to(state / "data", target_is_directory=True)
+            (release / "fund").chmod(0o555)
+            release.chmod(0o555)
+            try:
+                with patch("app.routes.fund.ROOT_DIR", release), \
+                     patch("app.routes.fund.FUND_EDITOR_FILE", editor), \
+                     patch("app.routes.fund.FUND_CODES_FILE", release / "data" / "fund_codes.json"), \
+                     patch("app.routes.fund.is_resource_running", return_value=False):
+                    response = self.client.put("/api/fund/editor", json={
+                        "content": VALID_FUND_EDITOR_CONTENT.replace('"008115"', '"008116"')})
+                self.assertEqual(response.status_code, 200)
+                self.assertTrue(editor.is_symlink())
+                self.assertEqual(editor.resolve(), external.resolve())
+                self.assertIn('"008116"', external.read_text(encoding="utf-8"))
+                self.assertEqual(external.stat().st_mode & 0o777, 0o640)
+                self.assertEqual((release / "fund").stat().st_mode & 0o777, 0o555)
+                self.assertTrue((state / "data" / "fund_codes.json").is_file())
+            finally:
+                release.chmod(0o755)
+                (release / "fund").chmod(0o755)
+
     def test_fund_editor_api_saves_only_validated_fund_config(self):
         with tempfile.TemporaryDirectory(dir=ROOT_DIR) as tmp_dir:
             target = Path(tmp_dir) / "fund.py"

@@ -146,6 +146,11 @@ def call_akshare_operation(
         for key, value in kwargs.items()
     ):
         raise ValueError("AKShare 参数只允许标量")
+    if operation == "stock_repurchase_em":
+        if kwargs:
+            raise ValueError("stock_repurchase_em 不接受参数")
+        from app.services.repurchase_source import call_repurchase_source
+        return call_repurchase_source()
     import akshare
 
     function = getattr(akshare, operation, None)

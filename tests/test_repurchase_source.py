@@ -103,6 +103,10 @@ class RepurchaseSourceTests(unittest.TestCase):
             "2026-09-30T00:00:00.000"])
         self.assertEqual(value["source_metadata"]["page_count"], 2)
         self.assertEqual(value["source_metadata"]["request_count"], 2)
+        self.assertIs(value["source_metadata"]["pages_complete"], True)
+        self.assertIs(value["source_metadata"]["schema_verified"], True)
+        self.assertEqual(value["source_metadata"]["total_rows"], 501)
+        self.assertEqual(value["source_metadata"]["query_scope"]["universe"], "all_market")
 
     def test_cache_preserves_actual_fetch_time_and_isolated_payload(self):
         """缓存命中保留同一观察身份，调用方不能改坏内部缓存。"""

@@ -737,7 +737,13 @@ class FlaskAppTest(unittest.TestCase):
         self.assertIn("log_lines", payload["refresh"])
 
     def test_fund_page_renders_native_report_without_iframe(self):
-        response = self.client.get("/fund")
+        """使用临时报告，避免完整测试依赖被忽略的用户本地数据。"""
+        with tempfile.TemporaryDirectory() as directory:
+            report_path = Path(directory) / "report.json"
+            report_path.write_text(json.dumps({"generated_at": "2026-09-30 17:00",
+                                               "period_labels": [], "sections": {}}, ensure_ascii=False))
+            self.client.application.config["FUND_REPORT_DATA_FILE"] = report_path
+            response = self.client.get("/fund")
 
         self.assertEqual(response.status_code, 200)
         html = response.get_data(as_text=True)

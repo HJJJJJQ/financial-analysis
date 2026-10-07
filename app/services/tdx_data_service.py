@@ -156,6 +156,9 @@ def call_akshare_operation(
     function = getattr(akshare, operation, None)
     if not callable(function):
         raise RuntimeError("当前 AKShare 版本缺少接口: %s" % operation)
+    if operation.startswith("stock_lhb_"):
+        from app.services.lhb_source import call_lhb_source
+        return call_lhb_source(operation, kwargs, function)
     result = function(**kwargs)
     frame = result if isinstance(result, pd.DataFrame) else pd.DataFrame(result)
     payload = json.loads(frame.to_json(

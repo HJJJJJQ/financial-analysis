@@ -154,6 +154,11 @@ class RepurchaseSource:
         if self.clock() >= deadline:
             raise TimeoutError("回购源总预算耗尽")
         frame = self._frame(rows)
+        if not all(isinstance(row, dict) and set(_COLUMN_MAP).issubset(row) for row in rows):
+            raise ValueError("回购源字段合同不完整")
+        if (not bool(frame["股票代码"].astype(str).str.fullmatch(r"\d{6}").all())
+                or frame["最新公告日期"].isna().any()):
+            raise ValueError("回购源代码或公告日期合同无效")
         split = json.loads(frame.to_json(orient="split", date_format="iso", force_ascii=False))
         result = {"operation": "stock_repurchase_em", "kind": "dataframe",
                   "columns": split["columns"], "data": split["data"]}
@@ -166,6 +171,12 @@ class RepurchaseSource:
                                      "elapsed_seconds": self.clock() - started,
                                      "deadline_seconds": self.deadline_seconds,
                                      "max_pages": self.max_pages, "max_rows": self.max_rows}
+        result["source_metadata"].update(
+            pages_complete=True, schema_verified=True, total_rows=len(rows),
+            expected_total_rows=expected, page_size=500, legal_empty=False,
+            query_scope={"operation": "stock_repurchase_em", "universe": "all_market",
+                         "type": "full_snapshot", "report_name": params["reportName"]},
+            schema_verification="akshare-1.18.81-repurchase-columns-key-date-v1")
         return result
 
     def _page(self, session, params: dict, deadline: float) -> tuple[dict, int]:

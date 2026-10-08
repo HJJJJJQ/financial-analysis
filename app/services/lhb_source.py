@@ -192,14 +192,19 @@ class _BoundedPages:
             self.pages[1] = first
             self.total_rows, self.page_count, self.page_size = 0, 1, size
             return
-        if pages != math.ceil(total/size):
+        first_data = result.get("data")
+        if not isinstance(first_data, list) or not 1 <= len(first_data) <= size:
+            raise LhbSourceError("龙虎榜首页缺失或超出单页预算")
+        # 来源可能将 pageSize=5000 限制为 500；按真实首页推导固定页容量，仍须收齐 count 行。
+        actual_size = len(first_data) if pages > 1 else size
+        if pages != math.ceil(total/actual_size):
             raise LhbSourceError("龙虎榜总行数与分页不一致")
         collected = 0
         for page in range(1, pages+1):
             payload = first if page == 1 else self._page(dict(params, pageNumber=page))
             current = payload["result"]
             data = current.get("data")
-            expected = min(size, total-(page-1)*size)
+            expected = min(actual_size, total-(page-1)*actual_size)
             if current.get("pages") != pages or current.get("count") != total or not isinstance(data, list) or len(data) != expected:
                 raise LhbSourceError("龙虎榜分页缺失或集合发生变化")
             for row in data:
@@ -221,7 +226,7 @@ class _BoundedPages:
             self.pages[page] = payload
         if collected != total:
             raise LhbSourceError("龙虎榜最终行数未达到来源总行数")
-        self.total_rows, self.page_count, self.page_size = total, pages, size
+        self.total_rows, self.page_count, self.page_size = total, pages, actual_size
         self.schema_digest = hashlib.sha256(json.dumps(self.raw_keys).encode()).hexdigest()
 
 

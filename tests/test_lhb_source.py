@@ -82,11 +82,12 @@ class _Response:
 class _Session:
     """模拟按固定报告取页，并记录超时、请求次数和并发屏障。"""
 
-    def __init__(self, rows, *, entered=None, release=None):
+    def __init__(self, rows, *, entered=None, release=None, server_page_size=None):
         """准备可变分页 fixture 和可选同键并发等待。"""
         self.rows, self.entered, self.release = rows, entered, release
         self.calls, self.override = [], {}
         self.error = None
+        self.server_page_size = server_page_size
 
     def __enter__(self):
         """提供 fixture 会话。"""
@@ -106,6 +107,7 @@ class _Session:
                 raise RuntimeError("fixture 并发屏障耗尽")
         if self.error:
             raise self.error
+        size = min(size, self.server_page_size) if self.server_page_size else size
         value = {"success": True, "result": {"pages": (len(self.rows)+size-1)//size,
                  "count": len(self.rows), "data": self.rows[(page-1)*size:page*size]}}
         value["result"].update(self.override.get(page, {}))
@@ -166,6 +168,34 @@ class LhbSourceTests(unittest.TestCase):
         with self.assertRaises(LhbSourceError):
             source.call(operation, self._kwargs(operation), getattr(akshare, operation))
         self.assertEqual(source.status()["cache_entries"], 0)
+
+    def test_server_page_size_cap_collects_all_1046_active_seat_rows(self):
+        """真实 5000 请求被限制到 500，三页全部校验且首页不重复请求。"""
+        operation = "stock_lhb_hyyyb_em"
+        session = _Session([_raw_row(operation, i) for i in range(1046)], server_page_size=500)
+        value = LhbSource(session_factory=lambda: session).call(
+            operation, self._kwargs(operation), getattr(akshare, operation))
+        self.assertEqual([(call[0], call[1]) for call in session.calls], [(1, 5000), (2, 5000), (3, 5000)])
+        self.assertEqual(len(value["data"]), 1046)
+        self.assertEqual(value["source_metadata"]["total_rows"], 1046)
+        self.assertEqual(value["source_metadata"]["page_count"], 3)
+        self.assertEqual(value["source_metadata"]["page_size"], 500)
+        self.assertIs(value["source_metadata"]["pages_complete"], True)
+
+    def test_server_cap_keeps_strict_page_count_length_and_snapshot_checks(self):
+        """有效首页容量不能豁免短中间页、短末页、页数变动或 count 漂移。"""
+        operation = "stock_lhb_hyyyb_em"
+        rows = [_raw_row(operation, i) for i in range(1046)]
+        invalid = [(1, {"pages": 2}), (2, {"data": rows[500:999]}),
+                   (3, {"data": rows[1000:1045]}), (2, {"count": 1047}), (2, {"pages": 4})]
+        for page, override in invalid:
+            with self.subTest(page=page, override=list(override)):
+                session = _Session(rows, server_page_size=500)
+                session.override[page] = override
+                source = LhbSource(session_factory=lambda: session)
+                with self.assertRaises(LhbSourceError):
+                    source.call(operation, self._kwargs(operation), getattr(akshare, operation))
+                self.assertEqual(source.status()["cache_entries"], 0)
 
     def test_explicit_success_count_zero_returns_valid_columns_and_proof(self):
         """空表保留各族固定字段，只有来源明确为空才标 legal_empty。"""
